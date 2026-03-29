@@ -1,0 +1,105 @@
+---
+- name: Deploy Node.js app to EC2
+  hosts: webservers
+  become: yes
+
+  vars:
+    app_dir: /var/www/myapp
+    app_repo: https://github.com/YOUR_USERNAME/YOUR_REPO.git
+    node_env: production
+
+  tasks:
+
+    - name: Install required packages
+      apt:
+        name:
+          - git
+          - nginx
+          - curl
+        state: present
+        update_cache: yes
+
+    - name: Install Node.js 20.x
+      shell: |
+        curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+        apt-get install -y nodejs
+      args:
+        creates: /usr/bin/node
+
+    - name: Install PM2 globally
+      npm:
+        name: pm2
+        global: yes
+        state: present
+
+    - name: Create app directory
+      file:
+        path: "{{ app_dir }}"
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        mode: '0755'
+
+    - name: Pull latest code from GitHub
+      git:
+        repo: "{{ app_repo }}"
+        dest: "{{ app_dir }}"
+        version: main
+        force: yes
+      become_user: ubuntu
+
+    - name: Install npm dependencies
+      npm:
+        path: "{{ app_dir }}"
+        state: present
+        production: yes
+      become_user: ubuntu
+
+    - name: Copy nginx config
+      copy:
+        dest: /etc/nginx/sites-available/myapp
+        content: |
+          server {
+              listen 80;
+              server_name _;
+
+              location / {
+                  proxy_pass http://localhost:3000;
+                  proxy_http_version 1.1;
+                  proxy_set_header Upgrade $http_upgrade;
+                  proxy_set_header Connection 'upgrade';
+                  proxy_set_header Host $host;
+                  proxy_cache_bypass $http_upgrade;
+              }
+          }
+
+    - name: Enable nginx site
+      file:
+        src: /etc/nginx/sites-available/myapp
+        dest: /etc/nginx/sites-enabled/myapp
+        state: link
+
+    - name: Remove default nginx site
+      file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+
+    - name: Restart nginx
+      service:
+        name: nginx
+        state: restarted
+        enabled: yes
+
+    - name: Start or restart app with PM2
+      shell: |
+        cd {{ app_dir }}
+        pm2 describe myapp > /dev/null 2>&1 && pm2 restart myapp || pm2 start src/app.js --name myapp
+        pm2 save
+      become_user: ubuntu
+      environment:
+        NODE_ENV: "{{ node_env }}"
+        PORT: "3000"
+
+    - name: Set PM2 to start on boot
+      shell: pm2 startup systemd -u ubuntu --hp /home/ubuntu | tail -1 | bash
+      ignore_errors: yes
