@@ -10,6 +10,10 @@
 
   tasks:
 
+    # ─────────────────────────────────────────
+    # 1. System packages
+    # ─────────────────────────────────────────
+
     - name: Install required packages
       apt:
         name:
@@ -31,6 +35,10 @@
         name: pm2
         global: yes
         state: present
+
+    # ─────────────────────────────────────────
+    # 2. App directory & code
+    # ─────────────────────────────────────────
 
     - name: Create app directory
       file:
@@ -54,6 +62,10 @@
         state: present
         production: yes
       become_user: ubuntu
+
+    # ─────────────────────────────────────────
+    # 3. Nginx config
+    # ─────────────────────────────────────────
 
     - name: Copy nginx config
       copy:
@@ -90,6 +102,10 @@
         state: restarted
         enabled: yes
 
+    # ─────────────────────────────────────────
+    # 4. Start app with PM2
+    # ─────────────────────────────────────────
+
     - name: Start or restart app with PM2
       shell: |
         cd {{ app_dir }}
@@ -100,6 +116,22 @@
         NODE_ENV: "{{ node_env }}"
         PORT: "3000"
 
-    - name: Set PM2 to start on boot
-      shell: pm2 startup systemd -u ubuntu --hp /home/ubuntu | tail -1 | bash
+    # ─────────────────────────────────────────
+    # 5. PM2 auto-start on server reboot
+    #    FIX: capture output first, then run
+    #    the sudo line separately to avoid the
+    #    "$: command not found" pipe error
+    # ─────────────────────────────────────────
+
+    - name: Generate PM2 startup script
+      shell: pm2 startup systemd -u ubuntu --hp /home/ubuntu
+      become_user: ubuntu
+      register: pm2_startup_output
+      ignore_errors: yes
+
+    - name: Run the PM2 startup command as root
+      shell: "{{ pm2_startup_output.stdout_lines | select('match', '^sudo .*') | list | first }}"
+      when:
+        - pm2_startup_output.stdout_lines is defined
+        - pm2_startup_output.stdout_lines | select('match', '^sudo .*') | list | length > 0
       ignore_errors: yes
