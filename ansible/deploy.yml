@@ -5,7 +5,7 @@
 
   vars:
     app_dir: /var/www/myapp
-    app_repo: https://github.com/sidoncode/ansible-ci-cd.git
+    app_repo: https://github.com/Paras52/ansible-ci-cd.git
     node_env: production
 
   tasks:
